@@ -419,6 +419,7 @@ export interface AddOptions {
   fullDepth?: boolean;
   copy?: boolean;
   frozenLockfile?: boolean;
+  features?: string[];
 }
 
 /**
@@ -1787,6 +1788,12 @@ export function parseAddOptions(args: string[]): { source: string[]; options: Ad
       options.copy = true;
     } else if (arg === '--frozen-lockfile' || arg === '--frozen') {
       options.frozenLockfile = true;
+    } else if (arg === '--features') {
+      i++;
+      const nextArg = args[i];
+      if (nextArg) {
+        options.features = nextArg.split(',').map((f) => f.trim());
+      }
     } else if (arg && !arg.startsWith('-')) {
       source.push(arg);
     }

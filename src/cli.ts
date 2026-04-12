@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
 import { basename, join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import * as p from '@clack/prompts';
 import { runAdd, parseAddOptions, initTelemetry } from './add.ts';
 import { runFind } from './find.ts';
 import { runInstallFromLock } from './install.ts';
@@ -13,7 +14,12 @@ import { removeCommand, parseRemoveOptions } from './remove.ts';
 import { runSync, parseSyncOptions } from './sync.ts';
 import { track } from './telemetry.ts';
 import { fetchSkillFolderHash, getGitHubToken } from './skill-lock.ts';
-import { buildUpdateInstallSource, formatSourceInput } from './update-source.ts';
+import { readLocalLock, type LocalSkillLockEntry } from './local-lock.ts';
+import {
+  buildUpdateInstallSource,
+  buildLocalUpdateSource,
+  formatSourceInput,
+} from './update-source.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -118,6 +124,11 @@ ${BOLD}Manage Skills:${RESET}
 ${BOLD}Updates:${RESET}
   check                Check for available skill updates
   update               Update all skills to latest versions
+
+${BOLD}Check/Update Options:${RESET}
+  -g, --global           Check/update global skills only
+  -p, --project          Check/update project skills only
+  -y, --yes              Skip scope prompt (auto-detect: project if in a project, else global)
 
 ${BOLD}Project:${RESET}
   experimental_install Restore skills from skills-lock.json
@@ -325,10 +336,133 @@ function readSkillLock(): SkillLockFile {
   }
 }
 
+// ============================================
+// Scope Detection and Prompt
+// ============================================
+
+type UpdateScope = 'project' | 'global' | 'both';
+
+interface UpdateCheckOptions {
+  global?: boolean;
+  project?: boolean;
+  yes?: boolean;
+}
+
+function parseUpdateOptions(args: string[]): UpdateCheckOptions {
+  const options: UpdateCheckOptions = {};
+  for (const arg of args) {
+    if (arg === '-g' || arg === '--global') {
+      options.global = true;
+    } else if (arg === '-p' || arg === '--project') {
+      options.project = true;
+    } else if (arg === '-y' || arg === '--yes') {
+      options.yes = true;
+    }
+  }
+  return options;
+}
+
+/**
+ * Check whether the current working directory has project-level skills.
+ * Returns true if either:
+ * - skills-lock.json exists in cwd, OR
+ * - .agents/skills/ contains at least one subdirectory with a SKILL.md
+ */
+function hasProjectSkills(cwd?: string): boolean {
+  const dir = cwd || process.cwd();
+
+  // Check 1: skills-lock.json exists
+  const lockPath = join(dir, 'skills-lock.json');
+  if (existsSync(lockPath)) {
+    return true;
+  }
+
+  // Check 2: .agents/skills/ has at least one skill
+  const skillsDir = join(dir, '.agents', 'skills');
+  try {
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const skillMd = join(skillsDir, entry.name, 'SKILL.md');
+        if (existsSync(skillMd)) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // Directory doesn't exist
+  }
+
+  return false;
+}
+
+/**
+ * Determine the update/check scope via interactive prompt or auto-detection.
+ *
+ * Interactive mode (default):
+ *   Shows a prompt with Project / Global / Both options.
+ *
+ * Non-interactive mode (-y flag or non-TTY):
+ *   If cwd has project-level skills → 'project'
+ *   Otherwise → 'global'
+ *
+ * Explicit flags override everything:
+ *   -g → 'global'
+ *   -p → 'project'
+ *   -g -p → 'both'
+ */
+async function resolveUpdateScope(options: UpdateCheckOptions): Promise<UpdateScope> {
+  // Explicit flags take precedence
+  if (options.global && options.project) {
+    return 'both';
+  }
+  if (options.global) {
+    return 'global';
+  }
+  if (options.project) {
+    return 'project';
+  }
+
+  // Non-interactive auto-detection
+  if (options.yes || !process.stdin.isTTY) {
+    return hasProjectSkills() ? 'project' : 'global';
+  }
+
+  // Interactive prompt
+  const scope = await p.select({
+    message: 'Update scope',
+    options: [
+      {
+        value: 'project' as UpdateScope,
+        label: 'Project',
+        hint: 'Update skills in current directory',
+      },
+      {
+        value: 'global' as UpdateScope,
+        label: 'Global',
+        hint: 'Update skills in home directory',
+      },
+      {
+        value: 'both' as UpdateScope,
+        label: 'Both',
+        hint: 'Update all skills',
+      },
+    ],
+  });
+
+  if (p.isCancel(scope)) {
+    p.cancel('Cancelled');
+    process.exit(0);
+  }
+
+  return scope as UpdateScope;
+}
+
 interface SkippedSkill {
   name: string;
   reason: string;
   sourceUrl: string;
+  sourceType: string;
   ref?: string;
 }
 
@@ -340,10 +474,13 @@ function getSkipReason(entry: SkillLockEntry): string {
     return 'Local path';
   }
   if (entry.sourceType === 'git') {
-    return 'Git URL (hash tracking not supported)';
+    return 'Git URL';
+  }
+  if (entry.sourceType === 'well-known') {
+    return 'Well-known skill';
   }
   if (!entry.skillFolderHash) {
-    return 'No version hash available';
+    return 'Private or deleted repo';
   }
   if (!entry.skillPath) {
     return 'No skill path recorded';
@@ -352,179 +489,311 @@ function getSkipReason(entry: SkillLockEntry): string {
 }
 
 /**
+ * For well-known skills, strip the .well-known/... path and /SKILL.md suffix
+ * to produce the base URL the user originally used to install.
+ * e.g., "https://mintlify.com/docs/.well-known/skills/mintlify/SKILL.md"
+ *    -> "https://mintlify.com/docs"
+ */
+function getInstallSource(skill: SkippedSkill): string {
+  let url = skill.sourceUrl;
+  if (skill.sourceType === 'well-known') {
+    // Strip everything from /.well-known/ onwards
+    const idx = url.indexOf('/.well-known/');
+    if (idx !== -1) {
+      url = url.slice(0, idx);
+    }
+  }
+  return formatSourceInput(url, skill.ref);
+}
+
+/**
  * Print a list of skills that cannot be checked automatically,
  * with the reason and a manual update command for each.
+ * Skills from the same source are grouped together.
  */
 function printSkippedSkills(skipped: SkippedSkill[]): void {
   if (skipped.length === 0) return;
   console.log();
   console.log(`${DIM}${skipped.length} skill(s) cannot be checked automatically:${RESET}`);
+
+  // Group by install source to dedupe skills from the same repo
+  const grouped = new Map<string, SkippedSkill[]>();
   for (const skill of skipped) {
-    console.log(`  ${TEXT}•${RESET} ${skill.name} ${DIM}(${skill.reason})${RESET}`);
-    console.log(
-      `    ${DIM}To update: ${TEXT}npx skills add ${formatSourceInput(skill.sourceUrl, skill.ref)} -g -y${RESET}`
-    );
+    const source = getInstallSource(skill);
+    const existing = grouped.get(source) || [];
+    existing.push(skill);
+    grouped.set(source, existing);
+  }
+
+  for (const [source, skills] of grouped) {
+    if (skills.length === 1) {
+      const skill = skills[0]!;
+      console.log(`  ${TEXT}•${RESET} ${skill.name} ${DIM}(${skill.reason})${RESET}`);
+    } else {
+      const reason = skills[0]!.reason;
+      const names = skills.map((s) => s.name).join(', ');
+      console.log(`  ${TEXT}•${RESET} ${names} ${DIM}(${reason})${RESET}`);
+    }
+    console.log(`    ${DIM}To update: ${TEXT}npx skills add ${source} -g -y${RESET}`);
   }
 }
 
-async function runCheck(args: string[] = []): Promise<void> {
-  console.log(`${TEXT}Checking for skill updates...${RESET}`);
-  console.log();
+// ============================================
+// Check: Global Skills
+// ============================================
 
+async function checkGlobalSkills(
+  onProgress?: (current: number, total: number, name: string) => void
+): Promise<{
+  updates: Array<{ name: string; source: string }>;
+  errors: Array<{ name: string; source: string; error: string }>;
+  skipped: SkippedSkill[];
+  total: number;
+}> {
   const lock = readSkillLock();
   const skillNames = Object.keys(lock.skills);
-
-  if (skillNames.length === 0) {
-    console.log(`${DIM}No skills tracked in lock file.${RESET}`);
-    console.log(`${DIM}Install skills with${RESET} ${TEXT}npx skills add <package>${RESET}`);
-    return;
-  }
-
-  // Get GitHub token from user's environment for higher rate limits
-  const token = getGitHubToken();
-
-  // Group skills by source (owner/repo) to batch GitHub API calls
-  const skillsBySource = new Map<string, Array<{ name: string; entry: SkillLockEntry }>>();
-  const skipped: SkippedSkill[] = [];
-
-  for (const skillName of skillNames) {
-    const entry = lock.skills[skillName];
-    if (!entry) continue;
-
-    // Only check skills with folder hash and skill path
-    if (!entry.skillFolderHash || !entry.skillPath) {
-      skipped.push({
-        name: skillName,
-        reason: getSkipReason(entry),
-        sourceUrl: entry.sourceUrl,
-        ref: entry.ref,
-      });
-      continue;
-    }
-
-    const existing = skillsBySource.get(entry.source) || [];
-    existing.push({ name: skillName, entry });
-    skillsBySource.set(entry.source, existing);
-  }
-
-  const totalSkills = skillNames.length - skipped.length;
-  if (totalSkills === 0) {
-    console.log(`${DIM}No GitHub skills to check.${RESET}`);
-    printSkippedSkills(skipped);
-    return;
-  }
-
-  console.log(`${DIM}Checking ${totalSkills} skill(s) for updates...${RESET}`);
-
   const updates: Array<{ name: string; source: string }> = [];
   const errors: Array<{ name: string; source: string; error: string }> = [];
-
-  // Check each source (one API call per repo)
-  for (const [source, skills] of skillsBySource) {
-    for (const { name, entry } of skills) {
-      try {
-        const latestHash = await fetchSkillFolderHash(source, entry.skillPath!, token, entry.ref);
-
-        if (!latestHash) {
-          errors.push({ name, source, error: 'Could not fetch from GitHub' });
-          continue;
-        }
-
-        if (latestHash !== entry.skillFolderHash) {
-          updates.push({ name, source });
-        }
-      } catch (err) {
-        errors.push({
-          name,
-          source,
-          error: err instanceof Error ? err.message : 'Unknown error',
-        });
-      }
-    }
-  }
-
-  console.log();
-
-  if (updates.length === 0) {
-    console.log(`${TEXT}✓ All skills are up to date${RESET}`);
-  } else {
-    console.log(`${TEXT}${updates.length} update(s) available:${RESET}`);
-    console.log();
-    for (const update of updates) {
-      console.log(`  ${TEXT}↑${RESET} ${update.name}`);
-      console.log(`    ${DIM}source: ${update.source}${RESET}`);
-    }
-    console.log();
-    console.log(
-      `${DIM}Run${RESET} ${TEXT}npx skills update${RESET} ${DIM}to update all skills${RESET}`
-    );
-  }
-
-  if (errors.length > 0) {
-    console.log();
-    console.log(`${DIM}Could not check ${errors.length} skill(s) (may need reinstall)${RESET}`);
-    console.log();
-    for (const error of errors) {
-      console.log(`  ${DIM}✗${RESET} ${error.name}`);
-      console.log(`    ${DIM}source: ${error.source}${RESET}`);
-    }
-  }
-
-  printSkippedSkills(skipped);
-
-  // Track telemetry
-  track({
-    event: 'check',
-    skillCount: String(totalSkills),
-    updatesAvailable: String(updates.length),
-  });
-
-  console.log();
-}
-
-async function runUpdate(): Promise<void> {
-  console.log(`${TEXT}Checking for skill updates...${RESET}`);
-  console.log();
-
-  const lock = readSkillLock();
-  const skillNames = Object.keys(lock.skills);
+  const skipped: SkippedSkill[] = [];
 
   if (skillNames.length === 0) {
-    console.log(`${DIM}No skills tracked in lock file.${RESET}`);
-    console.log(`${DIM}Install skills with${RESET} ${TEXT}npx skills add <package>${RESET}`);
-    return;
+    return { updates, errors, skipped, total: 0 };
   }
 
-  // Get GitHub token from user's environment for higher rate limits
   const token = getGitHubToken();
-
-  // Find skills that need updates by checking GitHub directly
-  const updates: Array<{ name: string; source: string; entry: SkillLockEntry }> = [];
-  const skipped: SkippedSkill[] = [];
+  const checkable: Array<{ name: string; entry: SkillLockEntry; source: string }> = [];
 
   for (const skillName of skillNames) {
     const entry = lock.skills[skillName];
     if (!entry) continue;
 
-    // Only check skills with folder hash and skill path
     if (!entry.skillFolderHash || !entry.skillPath) {
       skipped.push({
         name: skillName,
         reason: getSkipReason(entry),
         sourceUrl: entry.sourceUrl,
+        sourceType: entry.sourceType,
         ref: entry.ref,
       });
       continue;
     }
+
+    checkable.push({ name: skillName, entry, source: entry.source });
+  }
+
+  const total = checkable.length;
+
+  for (let i = 0; i < checkable.length; i++) {
+    const { name, entry, source } = checkable[i]!;
+    onProgress?.(i + 1, total, name);
+
+    try {
+      const latestHash = await fetchSkillFolderHash(source, entry.skillPath!, token, entry.ref);
+      if (!latestHash) {
+        errors.push({ name, source, error: 'Could not fetch from GitHub' });
+        continue;
+      }
+      if (latestHash !== entry.skillFolderHash) {
+        updates.push({ name, source });
+      }
+    } catch (err) {
+      errors.push({
+        name,
+        source,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  return { updates, errors, skipped, total };
+}
+
+// ============================================
+// Check: Project Skills
+// ============================================
+
+async function getProjectSkillsForUpdate(): Promise<
+  Array<{ name: string; source: string; entry: LocalSkillLockEntry }>
+> {
+  const localLock = await readLocalLock();
+  const skills: Array<{ name: string; source: string; entry: LocalSkillLockEntry }> = [];
+
+  for (const [name, entry] of Object.entries(localLock.skills)) {
+    // Skip node_modules and local path skills - they are managed by sync/manually
+    if (entry.sourceType === 'node_modules' || entry.sourceType === 'local') {
+      continue;
+    }
+    skills.push({ name, source: entry.source, entry });
+  }
+
+  return skills;
+}
+
+// ============================================
+// runCheck
+// ============================================
+
+async function runCheck(args: string[] = []): Promise<void> {
+  const options = parseUpdateOptions(args);
+  const scope = await resolveUpdateScope(options);
+
+  console.log(`${TEXT}Checking for skill updates...${RESET}`);
+  console.log();
+
+  let hasAnySkills = false;
+
+  // ---- Global check ----
+  if (scope === 'global' || scope === 'both') {
+    const { updates, errors, skipped, total } = await checkGlobalSkills(
+      (current, totalCount, name) => {
+        process.stdout.write(
+          `\r${DIM}Checking global skill ${current}/${totalCount}: ${name}${RESET}\x1b[K`
+        );
+      }
+    );
+    if (total > 0) {
+      // Clear the progress line
+      process.stdout.write('\r\x1b[K');
+    }
+
+    if (total === 0 && skipped.length === 0 && scope !== 'both') {
+      console.log(`${DIM}No global skills tracked in lock file.${RESET}`);
+      console.log(`${DIM}Install skills with${RESET} ${TEXT}npx skills add <package> -g${RESET}`);
+    } else if (total > 0 || skipped.length > 0) {
+      hasAnySkills = true;
+      console.log(`${BOLD}Global Skills${RESET}`);
+
+      if (updates.length === 0) {
+        console.log(`${TEXT}✓ All global skills are up to date${RESET}`);
+      } else {
+        console.log(`${TEXT}${updates.length} update(s) available:${RESET}`);
+        console.log();
+        for (const update of updates) {
+          console.log(`  ${TEXT}↑${RESET} ${update.name}`);
+          console.log(`    ${DIM}source: ${update.source}${RESET}`);
+        }
+      }
+
+      if (errors.length > 0) {
+        console.log();
+        console.log(`${DIM}Could not check ${errors.length} skill(s) (may need reinstall)${RESET}`);
+        for (const error of errors) {
+          console.log(`  ${DIM}✗${RESET} ${error.name}`);
+          console.log(`    ${DIM}source: ${error.source}${RESET}`);
+        }
+      }
+
+      printSkippedSkills(skipped);
+      console.log();
+    }
+
+    track({
+      event: 'check',
+      scope: 'global',
+      skillCount: String(total),
+      updatesAvailable: String(updates.length),
+    });
+  }
+
+  // ---- Project check ----
+  if (scope === 'project' || scope === 'both') {
+    const projectSkills = await getProjectSkillsForUpdate();
+
+    if (projectSkills.length === 0 && scope !== 'both') {
+      console.log(`${DIM}No project skills tracked in skills-lock.json.${RESET}`);
+      console.log(
+        `${DIM}Install project skills with${RESET} ${TEXT}npx skills add <package>${RESET}`
+      );
+    } else if (projectSkills.length > 0) {
+      hasAnySkills = true;
+      console.log(`${BOLD}Project Skills${RESET}`);
+      // For project skills we always re-clone (no change detection),
+      // so we list them as refreshable.
+      console.log(`${TEXT}${projectSkills.length} project skill(s) can be refreshed:${RESET}`);
+      console.log();
+      for (const skill of projectSkills) {
+        console.log(`  ${TEXT}↻${RESET} ${skill.name}`);
+        console.log(`    ${DIM}source: ${skill.source}${RESET}`);
+      }
+      console.log();
+      console.log(
+        `${DIM}Run${RESET} ${TEXT}npx skills update -p${RESET} ${DIM}to refresh project skills${RESET}`
+      );
+      console.log();
+    }
+
+    track({
+      event: 'check',
+      scope: 'project',
+      skillCount: String(projectSkills.length),
+      updatesAvailable: String(projectSkills.length),
+    });
+  }
+
+  if (!hasAnySkills) {
+    return;
+  }
+
+  if (scope === 'global' || scope === 'both') {
+    console.log(
+      `${DIM}Run${RESET} ${TEXT}npx skills update${RESET} ${DIM}to update skills${RESET}`
+    );
+    console.log();
+  }
+}
+
+// ============================================
+// Update: Global Skills
+// ============================================
+
+async function updateGlobalSkills(): Promise<{ successCount: number; failCount: number }> {
+  const lock = readSkillLock();
+  const skillNames = Object.keys(lock.skills);
+  let successCount = 0;
+  let failCount = 0;
+
+  if (skillNames.length === 0) {
+    console.log(`${DIM}No global skills tracked in lock file.${RESET}`);
+    console.log(`${DIM}Install skills with${RESET} ${TEXT}npx skills add <package> -g${RESET}`);
+    return { successCount, failCount };
+  }
+
+  const token = getGitHubToken();
+  const updates: Array<{ name: string; source: string; entry: SkillLockEntry }> = [];
+  const skipped: SkippedSkill[] = [];
+  const checkable: Array<{ name: string; entry: SkillLockEntry }> = [];
+
+  for (const skillName of skillNames) {
+    const entry = lock.skills[skillName];
+    if (!entry) continue;
+
+    if (!entry.skillFolderHash || !entry.skillPath) {
+      skipped.push({
+        name: skillName,
+        reason: getSkipReason(entry),
+        sourceUrl: entry.sourceUrl,
+        sourceType: entry.sourceType,
+        ref: entry.ref,
+      });
+      continue;
+    }
+
+    checkable.push({ name: skillName, entry });
+  }
+
+  for (let i = 0; i < checkable.length; i++) {
+    const { name: skillName, entry } = checkable[i]!;
+    process.stdout.write(
+      `\r${DIM}Checking global skill ${i + 1}/${checkable.length}: ${skillName}${RESET}\x1b[K`
+    );
 
     try {
       const latestHash = await fetchSkillFolderHash(
         entry.source,
-        entry.skillPath,
+        entry.skillPath!,
         token,
         entry.ref
       );
-
       if (latestHash && latestHash !== entry.skillFolderHash) {
         updates.push({ name: skillName, source: entry.source, entry });
       }
@@ -533,35 +802,30 @@ async function runUpdate(): Promise<void> {
     }
   }
 
-  const checkedCount = skillNames.length - skipped.length;
+  if (checkable.length > 0) {
+    process.stdout.write('\r\x1b[K');
+  }
+
+  const checkedCount = checkable.length;
 
   if (checkedCount === 0) {
-    console.log(`${DIM}No skills to check.${RESET}`);
+    console.log(`${DIM}No global skills to check.${RESET}`);
     printSkippedSkills(skipped);
-    return;
+    return { successCount, failCount };
   }
 
   if (updates.length === 0) {
-    console.log(`${TEXT}✓ All skills are up to date${RESET}`);
-    console.log();
-    return;
+    console.log(`${TEXT}✓ All global skills are up to date${RESET}`);
+    return { successCount, failCount };
   }
 
-  console.log(`${TEXT}Found ${updates.length} update(s)${RESET}`);
+  console.log(`${TEXT}Found ${updates.length} global update(s)${RESET}`);
   console.log();
-
-  // Reinstall each skill that has an update
-  let successCount = 0;
-  let failCount = 0;
 
   for (const update of updates) {
     console.log(`${TEXT}Updating ${update.name}...${RESET}`);
-
-    // Build the source input to target the specific skill directory/ref.
-    // e.g., owner/repo/skills/my-skill#feature-branch
     const installUrl = buildUpdateInstallSource(update.entry);
 
-    // Reinstall using the current CLI entrypoint directly (avoid nested npm exec/npx)
     const cliEntry = join(__dirname, '..', 'bin', 'cli.mjs');
     if (!existsSync(cliEntry)) {
       failCount++;
@@ -585,20 +849,117 @@ async function runUpdate(): Promise<void> {
     }
   }
 
-  console.log();
-  if (successCount > 0) {
-    console.log(`${TEXT}✓ Updated ${successCount} skill(s)${RESET}`);
+  printSkippedSkills(skipped);
+  return { successCount, failCount };
+}
+
+// ============================================
+// Update: Project Skills
+// ============================================
+
+async function updateProjectSkills(): Promise<{ successCount: number; failCount: number }> {
+  const projectSkills = await getProjectSkillsForUpdate();
+  let successCount = 0;
+  let failCount = 0;
+
+  if (projectSkills.length === 0) {
+    console.log(`${DIM}No project skills to update.${RESET}`);
+    console.log(
+      `${DIM}Install project skills with${RESET} ${TEXT}npx skills add <package>${RESET}`
+    );
+    return { successCount, failCount };
   }
-  if (failCount > 0) {
-    console.log(`${DIM}Failed to update ${failCount} skill(s)${RESET}`);
+
+  console.log(`${TEXT}Refreshing ${projectSkills.length} project skill(s)...${RESET}`);
+  console.log();
+
+  for (const skill of projectSkills) {
+    console.log(`${TEXT}Updating ${skill.name}...${RESET}`);
+    const installUrl = buildLocalUpdateSource(skill.entry);
+
+    const cliEntry = join(__dirname, '..', 'bin', 'cli.mjs');
+    if (!existsSync(cliEntry)) {
+      failCount++;
+      console.log(
+        `  ${DIM}✗ Failed to update ${skill.name}: CLI entrypoint not found at ${cliEntry}${RESET}`
+      );
+      continue;
+    }
+
+    // Re-clone without -g to install at project scope
+    const result = spawnSync(process.execPath, [cliEntry, 'add', installUrl, '-y'], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      shell: process.platform === 'win32',
+    });
+
+    if (result.status === 0) {
+      successCount++;
+      console.log(`  ${TEXT}✓${RESET} Updated ${skill.name}`);
+    } else {
+      failCount++;
+      console.log(`  ${DIM}✗ Failed to update ${skill.name}${RESET}`);
+    }
+  }
+
+  return { successCount, failCount };
+}
+
+// ============================================
+// runUpdate
+// ============================================
+
+async function runUpdate(args: string[] = []): Promise<void> {
+  const options = parseUpdateOptions(args);
+  const scope = await resolveUpdateScope(options);
+
+  console.log(`${TEXT}Checking for skill updates...${RESET}`);
+  console.log();
+
+  let totalSuccess = 0;
+  let totalFail = 0;
+
+  // ---- Global update ----
+  if (scope === 'global' || scope === 'both') {
+    if (scope === 'both') {
+      console.log(`${BOLD}Global Skills${RESET}`);
+    }
+    const { successCount, failCount } = await updateGlobalSkills();
+    totalSuccess += successCount;
+    totalFail += failCount;
+    if (scope === 'both') {
+      console.log();
+    }
+  }
+
+  // ---- Project update ----
+  if (scope === 'project' || scope === 'both') {
+    if (scope === 'both') {
+      console.log(`${BOLD}Project Skills${RESET}`);
+    }
+    const { successCount, failCount } = await updateProjectSkills();
+    totalSuccess += successCount;
+    totalFail += failCount;
+  }
+
+  console.log();
+  if (totalSuccess > 0) {
+    console.log(`${TEXT}✓ Updated ${totalSuccess} skill(s)${RESET}`);
+  }
+  if (totalFail > 0) {
+    console.log(`${DIM}Failed to update ${totalFail} skill(s)${RESET}`);
+  }
+  if (totalSuccess === 0 && totalFail === 0) {
+    // No updates found/attempted - the sub-functions already printed their messages
   }
 
   // Track telemetry
   track({
     event: 'update',
-    skillCount: String(updates.length),
-    successCount: String(successCount),
-    failCount: String(failCount),
+    scope,
+    skillCount: String(totalSuccess + totalFail),
+    successCount: String(totalSuccess),
+    failCount: String(totalFail),
   });
 
   console.log();
@@ -669,11 +1030,11 @@ async function main(): Promise<void> {
       await runList(restArgs);
       break;
     case 'check':
-      runCheck(restArgs);
+      await runCheck(restArgs);
       break;
     case 'update':
     case 'upgrade':
-      runUpdate();
+      await runUpdate(restArgs);
       break;
     case '--help':
     case '-h':

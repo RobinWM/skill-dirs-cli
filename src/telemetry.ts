@@ -28,12 +28,14 @@ interface RemoveTelemetryData {
 
 interface CheckTelemetryData {
   event: 'check';
+  scope?: string;
   skillCount: string;
   updatesAvailable: string;
 }
 
 interface UpdateTelemetryData {
   event: 'update';
+  scope?: string;
   skillCount: string;
   successCount: string;
   failCount: string;

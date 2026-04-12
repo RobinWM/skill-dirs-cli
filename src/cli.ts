@@ -87,10 +87,7 @@ function showBanner(): void {
   );
   console.log();
   console.log(
-    `  ${DIM}$${RESET} ${TEXT}npx skills check${RESET}                ${DIM}Check for updates${RESET}`
-  );
-  console.log(
-    `  ${DIM}$${RESET} ${TEXT}npx skills update${RESET}               ${DIM}Update all skills${RESET}`
+    `  ${DIM}$${RESET} ${TEXT}npx skills update${RESET}               ${DIM}Update installed skills${RESET}`
   );
   console.log();
   console.log(
@@ -122,12 +119,11 @@ ${BOLD}Manage Skills:${RESET}
   find [query]         Search for skills interactively
 
 ${BOLD}Updates:${RESET}
-  check [skills...]    Check for available skill updates
-  update [skills...]   Update skills to latest versions
+  update [skills...]   Update skills to latest versions (alias: upgrade)
 
-${BOLD}Check/Update Options:${RESET}
-  -g, --global           Check/update global skills only
-  -p, --project          Check/update project skills only
+${BOLD}Update Options:${RESET}
+  -g, --global           Update global skills only
+  -p, --project          Update project skills only
   -y, --yes              Skip scope prompt (auto-detect: project if in a project, else global)
 
 ${BOLD}Project:${RESET}
@@ -179,7 +175,6 @@ ${BOLD}Examples:${RESET}
   ${DIM}$${RESET} skills ls --json                      ${DIM}# JSON output${RESET}
   ${DIM}$${RESET} skills find                          ${DIM}# interactive search${RESET}
   ${DIM}$${RESET} skills find typescript               ${DIM}# search by keyword${RESET}
-  ${DIM}$${RESET} skills check
   ${DIM}$${RESET} skills update
   ${DIM}$${RESET} skills update my-skill             ${DIM}# update a single skill${RESET}
   ${DIM}$${RESET} skills update -g                    ${DIM}# update global skills only${RESET}
@@ -566,80 +561,7 @@ function printSkippedSkills(skipped: SkippedSkill[]): void {
 }
 
 // ============================================
-// Check: Global Skills
-// ============================================
-
-async function checkGlobalSkills(options?: {
-  onProgress?: (current: number, total: number, name: string) => void;
-  skillFilter?: string[];
-}): Promise<{
-  updates: Array<{ name: string; source: string }>;
-  errors: Array<{ name: string; source: string; error: string }>;
-  skipped: SkippedSkill[];
-  total: number;
-}> {
-  const lock = readSkillLock();
-  const skillNames = Object.keys(lock.skills);
-  const updates: Array<{ name: string; source: string }> = [];
-  const errors: Array<{ name: string; source: string; error: string }> = [];
-  const skipped: SkippedSkill[] = [];
-
-  if (skillNames.length === 0) {
-    return { updates, errors, skipped, total: 0 };
-  }
-
-  const token = getGitHubToken();
-  const checkable: Array<{ name: string; entry: SkillLockEntry; source: string }> = [];
-
-  for (const skillName of skillNames) {
-    if (!matchesSkillFilter(skillName, options?.skillFilter)) continue;
-
-    const entry = lock.skills[skillName];
-    if (!entry) continue;
-
-    if (!entry.skillFolderHash || !entry.skillPath) {
-      skipped.push({
-        name: skillName,
-        reason: getSkipReason(entry),
-        sourceUrl: entry.sourceUrl,
-        sourceType: entry.sourceType,
-        ref: entry.ref,
-      });
-      continue;
-    }
-
-    checkable.push({ name: skillName, entry, source: entry.source });
-  }
-
-  const total = checkable.length;
-
-  for (let i = 0; i < checkable.length; i++) {
-    const { name, entry, source } = checkable[i]!;
-    options?.onProgress?.(i + 1, total, name);
-
-    try {
-      const latestHash = await fetchSkillFolderHash(source, entry.skillPath!, token, entry.ref);
-      if (!latestHash) {
-        errors.push({ name, source, error: 'Could not fetch from GitHub' });
-        continue;
-      }
-      if (latestHash !== entry.skillFolderHash) {
-        updates.push({ name, source });
-      }
-    } catch (err) {
-      errors.push({
-        name,
-        source,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      });
-    }
-  }
-
-  return { updates, errors, skipped, total };
-}
-
-// ============================================
-// Check: Project Skills
+// Project Skills Discovery
 // ============================================
 
 async function getProjectSkillsForUpdate(
@@ -658,120 +580,6 @@ async function getProjectSkillsForUpdate(
   }
 
   return skills;
-}
-
-// ============================================
-// runCheck
-// ============================================
-
-async function runCheck(args: string[] = []): Promise<void> {
-  const options = parseUpdateOptions(args);
-  const scope = await resolveUpdateScope(options);
-
-  console.log(`${TEXT}Checking for skill updates...${RESET}`);
-  console.log();
-
-  let hasAnySkills = false;
-
-  // ---- Global check ----
-  if (scope === 'global' || scope === 'both') {
-    const { updates, errors, skipped, total } = await checkGlobalSkills({
-      onProgress: (current, totalCount, name) => {
-        process.stdout.write(
-          `\r${DIM}Checking global skill ${current}/${totalCount}: ${name}${RESET}\x1b[K`
-        );
-      },
-      skillFilter: options.skills,
-    });
-    if (total > 0) {
-      // Clear the progress line
-      process.stdout.write('\r\x1b[K');
-    }
-
-    if (total === 0 && skipped.length === 0 && scope !== 'both') {
-      console.log(`${DIM}No global skills tracked in lock file.${RESET}`);
-      console.log(`${DIM}Install skills with${RESET} ${TEXT}npx skills add <package> -g${RESET}`);
-    } else if (total > 0 || skipped.length > 0) {
-      hasAnySkills = true;
-      console.log(`${BOLD}Global Skills${RESET}`);
-
-      if (updates.length === 0) {
-        console.log(`${TEXT}✓ All global skills are up to date${RESET}`);
-      } else {
-        console.log(`${TEXT}${updates.length} update(s) available:${RESET}`);
-        console.log();
-        for (const update of updates) {
-          console.log(`  ${TEXT}↑${RESET} ${update.name}`);
-          console.log(`    ${DIM}source: ${update.source}${RESET}`);
-        }
-      }
-
-      if (errors.length > 0) {
-        console.log();
-        console.log(`${DIM}Could not check ${errors.length} skill(s) (may need reinstall)${RESET}`);
-        for (const error of errors) {
-          console.log(`  ${DIM}✗${RESET} ${error.name}`);
-          console.log(`    ${DIM}source: ${error.source}${RESET}`);
-        }
-      }
-
-      printSkippedSkills(skipped);
-      console.log();
-    }
-
-    track({
-      event: 'check',
-      scope: 'global',
-      skillCount: String(total),
-      updatesAvailable: String(updates.length),
-    });
-  }
-
-  // ---- Project check ----
-  if (scope === 'project' || scope === 'both') {
-    const projectSkills = await getProjectSkillsForUpdate(options.skills);
-
-    if (projectSkills.length === 0 && scope !== 'both') {
-      console.log(`${DIM}No project skills tracked in skills-lock.json.${RESET}`);
-      console.log(
-        `${DIM}Install project skills with${RESET} ${TEXT}npx skills add <package>${RESET}`
-      );
-    } else if (projectSkills.length > 0) {
-      hasAnySkills = true;
-      console.log(`${BOLD}Project Skills${RESET}`);
-      // For project skills we always re-clone (no change detection),
-      // so we list them as refreshable.
-      console.log(`${TEXT}${projectSkills.length} project skill(s) can be refreshed:${RESET}`);
-      console.log();
-      for (const skill of projectSkills) {
-        console.log(`  ${TEXT}↻${RESET} ${skill.name}`);
-        console.log(`    ${DIM}source: ${skill.source}${RESET}`);
-      }
-      console.log();
-      console.log(
-        `${DIM}Run${RESET} ${TEXT}npx skills update -p${RESET} ${DIM}to refresh project skills${RESET}`
-      );
-      console.log();
-    }
-
-    track({
-      event: 'check',
-      scope: 'project',
-      skillCount: String(projectSkills.length),
-      updatesAvailable: String(projectSkills.length),
-    });
-  }
-
-  if (!hasAnySkills) {
-    return;
-  }
-
-  if (scope === 'global' || scope === 'both') {
-    console.log(
-      `${DIM}Run${RESET} ${TEXT}npx skills update${RESET} ${DIM}to update skills${RESET}`
-    );
-    console.log();
-  }
 }
 
 // ============================================
@@ -1090,8 +898,6 @@ async function main(): Promise<void> {
       await runList(restArgs);
       break;
     case 'check':
-      await runCheck(restArgs);
-      break;
     case 'update':
     case 'upgrade':
       await runUpdate(restArgs);

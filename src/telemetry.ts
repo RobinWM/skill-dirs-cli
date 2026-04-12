@@ -26,13 +26,6 @@ interface RemoveTelemetryData {
   sourceType?: string;
 }
 
-interface CheckTelemetryData {
-  event: 'check';
-  scope?: string;
-  skillCount: string;
-  updatesAvailable: string;
-}
-
 interface UpdateTelemetryData {
   event: 'update';
   scope?: string;
@@ -58,7 +51,6 @@ interface SyncTelemetryData {
 type TelemetryData =
   | InstallTelemetryData
   | RemoveTelemetryData
-  | CheckTelemetryData
   | UpdateTelemetryData
   | FindTelemetryData
   | SyncTelemetryData;

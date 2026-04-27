@@ -61,6 +61,7 @@ import type { Skill, AgentType } from './types.ts';
 import {
   tryBlobInstall,
   getSkillFolderHashFromTree,
+  fetchRepoTree,
   type BlobSkill,
   type BlobInstallResult,
 } from './blob.ts';
@@ -1523,7 +1524,6 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     console.log();
     const successful = results.filter((r) => r.success);
     const failed = results.filter((r) => !r.success);
-
     // Track installation result
     // Build skillFiles map: { skillName: relative path to SKILL.md from repo root }
     const skillFiles: Record<string, string> = {};
@@ -1592,6 +1592,15 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
     // Add to skill lock file for update tracking (only for global installs)
     if (successful.length > 0 && installGlobally && normalizedSource) {
       const successfulSkillNames = new Set(successful.map((r) => r.skill));
+
+      // For GitHub clone installs, fetch the repo tree once and reuse it
+      // for all skills — avoids N sequential API calls that take ~400ms each.
+      let cachedTree: Awaited<ReturnType<typeof fetchRepoTree>> | undefined;
+      if (parsed.type === 'github' && !blobResult) {
+        const token = getGitHubToken();
+        cachedTree = await fetchRepoTree(normalizedSource, parsed.ref, token);
+      }
+
       for (const skill of selectedSkills) {
         const skillDisplayName = getSkillDisplayName(skill);
         if (successfulSkillNames.has(skillDisplayName)) {
@@ -1600,22 +1609,12 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
             const skillPathValue = skillFiles[skill.name];
 
             if (blobResult && skillPathValue) {
-              // Blob path: extract hash from the tree we already fetched (no extra API call)
               const hash = getSkillFolderHashFromTree(blobResult.tree, skillPathValue);
               if (hash) skillFolderHash = hash;
-            } else if (parsed.type === 'github' && skillPathValue) {
-              // Clone path: fetch folder hash from GitHub Trees API
-              const token = getGitHubToken();
-              const hash = await fetchSkillFolderHash(
-                normalizedSource,
-                skillPathValue,
-                token,
-                parsed.ref
-              );
+            } else if (parsed.type === 'github' && skillPathValue && cachedTree) {
+              const hash = getSkillFolderHashFromTree(cachedTree, skillPathValue);
               if (hash) skillFolderHash = hash;
             } else if (skillPathValue && tempDir) {
-              // Non-GitHub git source (Bitbucket, GitLab, Azure DevOps, self-hosted, etc.):
-              // compute hash from local clone — no platform API needed
               const skillDir = join(tempDir, dirname(skillPathValue));
               const hash = await computeSkillFolderHash(skillDir);
               if (hash) skillFolderHash = hash;

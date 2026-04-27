@@ -43,7 +43,9 @@ function main() {
 
   // Skip license generation if cwd has no package.json (e.g. when npx runs from /Users/foo with no project)
   if (!existsSync(join(process.cwd(), 'package.json'))) {
-    console.log('No package.json in cwd — skipping license generation (npx run from non-project dir)');
+    console.log(
+      'No package.json in cwd — skipping license generation (npx run from non-project dir)'
+    );
     writeFileSync('ThirdPartyNoticeText.txt', '/* No licenses generated — skipped */\n');
     return;
   }

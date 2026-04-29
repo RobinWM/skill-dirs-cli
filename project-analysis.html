@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>skills - Project Analysis</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-alt: #f1f4f9;
+      --text: #172033;
+      --muted: #5b667d;
+      --border: #d7dfeb;
+      --accent: #0f62fe;
+      --accent-soft: #e8f0ff;
+      --good: #117a37;
+      --warn: #9a6700;
+      --bad: #b42318;
+      --sidebar: #111827;
+      --sidebar-text: #d8dee9;
+      --sidebar-muted: #98a2b3;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    [data-theme="dark"] {
+      --bg: #0b1220;
+      --panel: #111827;
+      --panel-alt: #1a2335;
+      --text: #e5ecf6;
+      --muted: #9aa8bf;
+      --border: #2a364d;
+      --accent: #7cb3ff;
+      --accent-soft: #172741;
+      --good: #47c97e;
+      --warn: #f3c96b;
+      --bad: #ff8f8f;
+      --sidebar: #060b14;
+      --sidebar-text: #d3d9e5;
+      --sidebar-muted: #8391a8;
+      --shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: 280px;
+      background: var(--sidebar);
+      color: var(--sidebar-text);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 18px 18px;
+    }
+    .sidebar h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+    .sidebar .sub {
+      color: var(--sidebar-muted);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .nav {
+      display: grid;
+      gap: 6px;
+      margin-bottom: auto;
+    }
+    .nav a {
+      color: var(--sidebar-text);
+      text-decoration: none;
+      padding: 9px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .nav a:hover,
+    .nav a.active {
+      background: rgba(255, 255, 255, 0.09);
+    }
+    .sidebar-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 14px;
+      color: var(--sidebar-muted);
+      font-size: 12px;
+    }
+    .theme-toggle {
+      margin-top: 12px;
+      width: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--sidebar-text);
+      border-radius: 8px;
+      padding: 9px 12px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .content {
+      flex: 1;
+      padding: 36px 40px 64px;
+      max-width: 1080px;
+    }
+    .hero, .card, .module, .decision, .unknown, .risk {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      border-radius: 10px;
+    }
+    .hero {
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+    .hero h2 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    section {
+      margin-top: 28px;
+    }
+    section h3 {
+      margin: 0 0 12px;
+      font-size: 24px;
+    }
+    section > p {
+      margin: 0 0 14px;
+    }
+    .card {
+      padding: 18px 20px;
+      margin-bottom: 16px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .stat {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .stat .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1.1;
+    }
+    .stat .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 6px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    th, td {
+      padding: 11px 13px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    th {
+      background: var(--panel-alt);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    tr:last-child td { border-bottom: none; }
+    code {
+      background: var(--panel-alt);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      margin: 0 0 16px;
+      padding: 16px 18px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    pre.mermaid {
+      background: var(--panel-alt);
+    }
+    .module, .decision, .unknown, .risk {
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+    .module { border-left: 4px solid var(--accent); }
+    .decision { border-left: 4px solid #7a5af8; }
+    .unknown { border-left: 4px solid #12b76a; }
+    .risk.high { border-left: 4px solid var(--bad); }
+    .risk.medium { border-left: 4px solid var(--warn); }
+    .risk.low { border-left: 4px solid var(--good); }
+    .label {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      margin-left: 8px;
+    }
+    .severity {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      margin-right: 8px;
+    }
+    .severity.high { background: rgba(180, 35, 24, 0.12); color: var(--bad); }
+    .severity.medium { background: rgba(154, 103, 0, 0.13); color: var(--warn); }
+    .severity.low { background: rgba(17, 122, 55, 0.13); color: var(--good); }
+    ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+    li { margin-bottom: 6px; }
+    .mobile-toggle {
+      display: none;
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      z-index: 20;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      box-shadow: var(--shadow);
+    }
+    @media (max-width: 900px) {
+      .mobile-toggle { display: block; }
+      .sidebar {
+        position: fixed;
+        left: 0;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        z-index: 30;
+      }
+      .sidebar.open { transform: translateX(0); }
+      .content {
+        padding: 64px 18px 48px;
+      }
+      .hero h2 { font-size: 24px; }
+    }
+    @media print {
+      .sidebar, .mobile-toggle { display: none; }
+      .content { padding: 0; }
+      .hero, .card, .module, .decision, .unknown, .risk, table, pre {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <button class="mobile-toggle" id="mobileToggle">Menu</button>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <h1>skills</h1>
+      <div class="sub">Project analysis report</div>
+      <nav class="nav" id="nav">
+        <a href="#thesis" class="active">Project Thesis</a>
+        <a href="#shape">Repository Shape</a>
+        <a href="#stack">Tech Stack</a>
+        <a href="#architecture">Architecture Design</a>
+        <a href="#modules">Core Modules</a>
+        <a href="#decisions">Distinctive Decisions</a>
+        <a href="#quality">Quality Signals & Risks</a>
+        <a href="#unknowns">Unknowns Worth Verifying</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div>Generated by Repo Analyzer</div>
+        <div>Analysis date: 2026-04-29</div>
+        <button class="theme-toggle" id="themeToggle">Toggle dark mode</button>
+      </div>
+    </aside>
+    <main class="content">
+      <header class="hero">
+        <h2>skills source analysis</h2>
+        <p>`skills` is a compatibility-oriented distribution layer for the agent-skills ecosystem. Its main architectural challenge is turning many source formats and agent directory conventions into one predictable install and update experience.</p>
+        <div class="meta">
+          <span>Path: <code>f:\big-project\skill-dirs-cli</code></span>
+          <span>Primary language: TypeScript</span>
+          <span>License posture: MIT via package metadata</span>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="value">70</div><div class="label">tracked files</div></div>
+          <div class="stat"><div class="value">14,383</div><div class="label">non-empty lines scanned</div></div>
+          <div class="stat"><div class="value">21</div><div class="label">test files</div></div>
+          <div class="stat"><div class="value">13</div><div class="label">direct dependencies</div></div>
+        </div>
+      </header>
+
+      <section id="thesis">
+        <h3>Project Thesis</h3>
+        <div class="card">
+          <p>This repository is not primarily about downloading repositories. It is about normalizing skill discovery, installation, and update behavior across a large and unstable matrix of agent products and source formats.</p>
+          <ul>
+            <li>The center of gravity sits in <code>src/add.ts</code>, <code>src/installer.ts</code>, <code>src/skills.ts</code>, <code>src/agents.ts</code>, and <code>src/cli.ts</code>.</li>
+            <li>The defining constraint is ecosystem heterogeneity: GitHub, GitLab, well-known endpoints, local paths, plugin manifests, and <code>node_modules</code> are all supported.</li>
+            <li>This is not an agent runtime and not a general package manager; it projects skill folders into agent-readable filesystem layouts.</li>
+          </ul>
+        </div>
+        <table>
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Project Name</td><td><code>skills</code></td></tr>
+            <tr><td>Repository</td><td><code>f:\big-project\skill-dirs-cli</code></td></tr>
+            <tr><td>Primary Language</td><td>TypeScript on Node.js</td></tr>
+            <tr><td>License</td><td>MIT in <code>package.json</code>; no top-level <code>LICENSE</code> file found</td></tr>
+            <tr><td>Analysis Date</td><td>2026-04-29</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="shape">
+        <h3>Repository Shape</h3>
+        <div class="card">
+          <p>This is a single-package CLI repository with one runtime codebase, one test surface, and lightweight automation around publishing and agent metadata.</p>
+        </div>
+        <table>
+          <thead><tr><th>Area</th><th>Path</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>Runtime CLI</td><td><code>src/</code></td><td>Command routing, discovery, installation, sync, update, lock files, telemetry</td></tr>
+            <tr><td>Published shim</td><td><code>bin/cli.mjs</code></td><td>CLI entrypoint in distributed packages</td></tr>
+            <tr><td>Tests</td><td><code>tests/</code> and <code>src/*.test.ts</code></td><td>Cross-platform filesystem and parser verification</td></tr>
+            <tr><td>Automation</td><td><code>scripts/</code></td><td>Agent metadata sync and third-party notice generation</td></tr>
+            <tr><td>Bundled skill</td><td><code>skills/find-skills/SKILL.md</code></td><td>Dogfooded skill content</td></tr>
+            <tr><td>CI metadata</td><td><code>.github/workflows/</code></td><td>CI, publish, and agent-matrix workflows</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="stack">
+        <h3>Tech Stack</h3>
+        <table>
+          <thead><tr><th>Category</th><th>Technology</th><th>Version</th><th>Architectural role</th></tr></thead>
+          <tbody>
+            <tr><td>Language</td><td>TypeScript</td><td>5.9.3</td><td>Typed domain model for agents, skills, source parsing, and lock metadata</td></tr>
+            <tr><td>Runtime</td><td>Node.js</td><td>&gt;=18</td><td>Built-in fetch, filesystem APIs, child processes, and ESM support</td></tr>
+            <tr><td>CLI UX</td><td>@clack/prompts, picocolors</td><td>0.11.0, 1.1.1</td><td>Interactive install and summary flows without a heavy CLI framework</td></tr>
+            <tr><td>Parsing</td><td>yaml</td><td>2.8.3</td><td>Supports <code>SKILL.md</code> frontmatter, which is part of the product schema</td></tr>
+            <tr><td>Build</td><td>obuild</td><td>0.4.22</td><td>Minimal bundling/distribution pipeline</td></tr>
+            <tr><td>Testing</td><td>vitest</td><td>4.0.17</td><td>Fast path-heavy test coverage</td></tr>
+            <tr><td>Formatting</td><td>prettier</td><td>3.8.1</td><td>Style normalization enforced in CI on Ubuntu</td></tr>
+            <tr><td>Platform paths</td><td>xdg-basedir</td><td>5.1.0</td><td>Correct XDG global path behavior for shared agent directories</td></tr>
+            <tr><td>CI/CD</td><td>GitHub Actions</td><td>n/a</td><td>Cross-platform verification, publish automation, and agent metadata sync</td></tr>
+          </tbody>
+        </table>
+        <div class="card">
+          <p>The dependency footprint is intentionally small. Complexity is expressed in local code and filesystem rules rather than in framework layers, which is a good fit for a CLI whose hard problems are compatibility and projection.</p>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h3>Architecture Design</h3>
+        <div class="card">
+          <p>The project is a modular CLI monolith. It keeps packaging simple, but it relies on file-level ownership and convention rather than package boundaries to control complexity.</p>
+        </div>
+        <pre>Build:  pnpm build
+Run:    pnpm dev &lt;command&gt;   or   node src/cli.ts &lt;command&gt;
+Test:   pnpm test
+Deploy: push or tag -&gt; GitHub Actions publish workflow -&gt; npm</pre>
+        <pre class="mermaid">graph TD
+    A["CLI Surface<br/>src/cli.ts"] --&gt; B["Command Workflows<br/>add.ts list.ts remove.ts sync.ts"]
+    B --&gt; C["Domain Utilities<br/>skills.ts source-parser.ts plugin-manifest.ts agents.ts"]
+    B --&gt; D["State Tracking<br/>skill-lock.ts local-lock.ts telemetry.ts"]
+    B --&gt; E["Filesystem Materialization<br/>installer.ts git.ts blob.ts"]
+    C --&gt; E
+    D --&gt; E</pre>
+        <pre class="mermaid">flowchart LR
+    A["skilldirs add &lt;source&gt;"] --&gt; B["parseSource()"]
+    B --&gt; C["clone/fetch/resolve source"]
+    C --&gt; D["discoverSkills()"]
+    D --&gt; E["prompt + detect agents"]
+    E --&gt; F["install to canonical/agent dirs"]
+    F --&gt; G["write global/project locks"]
+    G --&gt; H["optional telemetry + audit"]</pre>
+        <div class="card">
+          <p>A typical install starts with source normalization, passes through discovery and interactive filtering, then ends as a concrete filesystem projection. That is why path safety and symlink behavior are core product logic here.</p>
+        </div>
+      </section>
+
+      <section id="modules">
+        <h3>Core Modules</h3>
+        <div class="card">
+          <p>The heaviest modules are the ones that transform source repos into stable local skill directories.</p>
+        </div>
+        <div class="module">
+          <strong>Command Router</strong><span class="label">src/cli.ts</span>
+          <p>Owns argv routing, help/banner UX, and most of the update/check workflow. It matters because update policy, legacy handling, and CLI re-entry all live here.</p>
+        </div>
+        <div class="module">
+          <strong>Install Orchestrator</strong><span class="label">src/add.ts</span>
+          <p>Owns parsing, fetch/clone, skill selection, agent selection, install summaries, audit display, installation, and lock writes. This is the main product nexus.</p>
+        </div>
+        <div class="module">
+          <strong>Filesystem Installer</strong><span class="label">src/installer.ts</span>
+          <p>Turns discovered skill content into canonical and agent-specific directories with symlink or copy fallback semantics.</p>
+        </div>
+        <div class="module">
+          <strong>Skill Discovery</strong><span class="label">src/skills.ts + src/plugin-manifest.ts</span>
+          <p>Finds valid skills in conventional directories, recursive layouts, and Claude plugin manifests while enforcing internal-skill and path-safety rules.</p>
+        </div>
+        <div class="module">
+          <strong>Agent Compatibility Matrix</strong><span class="label">src/agents.ts</span>
+          <p>Encodes the supported-agent catalog, project/global directories, and install detection heuristics. This is a product asset, not just config.</p>
+        </div>
+        <div class="module">
+          <strong>Locking and Update State</strong><span class="label">src/skill-lock.ts + src/local-lock.ts</span>
+          <p>Persists global and project install state with different tradeoffs: richer update metadata globally and deterministic, merge-friendly project lock files locally.</p>
+        </div>
+        <div class="module">
+          <strong>Node Modules Sync</strong><span class="label">src/sync.ts</span>
+          <p>Crawls <code>node_modules</code> for embedded skills and syncs them into project scope, showing the project wants skills to behave like distributable assets.</p>
+        </div>
+      </section>
+
+      <section id="decisions">
+        <h3>Distinctive Design Decisions</h3>
+        <div class="decision">
+          <strong>Canonical skill storage with agent projections</strong>
+          <p>The installer writes to canonical <code>.agents/skills</code> locations and then symlinks or copies into agent-specific paths. That reduces duplication but forces the codebase to own symlink edge cases.</p>
+        </div>
+        <div class="decision">
+          <strong>Universal-agent abstraction</strong>
+          <p>Agents sharing <code>.agents/skills</code> are treated differently from agent-specific directories. This avoids duplicate installs and double listing, but it makes support logic path-taxonomy aware.</p>
+        </div>
+        <div class="decision">
+          <strong>Two separate lock systems</strong>
+          <p>Global installs track GitHub tree hashes and user-state metadata, while project installs optimize for deterministic, merge-friendly versioned JSON. That split is thoughtful and unusually product-aware.</p>
+        </div>
+        <div class="decision">
+          <strong>Discovery by conventions before recursion</strong>
+          <p>The code checks many well-known directories before doing full recursive search. This keeps common cases fast and predictable but expands the maintenance burden of the compatibility matrix.</p>
+        </div>
+        <div class="decision">
+          <strong>Plugin manifest compatibility as first-class discovery</strong>
+          <p>Claude plugin manifests are parsed directly instead of being treated as out-of-band metadata. That turns the CLI into an ecosystem bridge.</p>
+        </div>
+        <div class="decision">
+          <strong>Update by CLI re-entry</strong>
+          <p>The update flow shells back into the CLI's own add command. This preserves behavioral consistency with install, though it makes debugging more process-oriented.</p>
+        </div>
+      </section>
+
+      <section id="quality">
+        <h3>Quality Signals &amp; Risks</h3>
+        <div class="card">
+          <p>The test posture is solid for a small CLI, especially around filesystem and path behavior, but complexity is still concentrated in a few orchestration files.</p>
+        </div>
+        <table>
+          <thead><tr><th>Metric</th><th>Status</th><th>Observation</th></tr></thead>
+          <tbody>
+            <tr><td>Test framework</td><td>Present</td><td><code>vitest</code> is wired through <code>package.json</code></td></tr>
+            <tr><td>Unit tests</td><td>Present</td><td>Parser, path, discovery, installer, lock, and command behavior coverage</td></tr>
+            <tr><td>Integration shape</td><td>Present</td><td>Many tests exercise the filesystem and act like lightweight integration tests</td></tr>
+            <tr><td>E2E CLI coverage</td><td>Limited</td><td>No obvious full published-agent smoke suite from static inspection</td></tr>
+            <tr><td>Test quality</td><td>Good</td><td>The tests are aligned with the project’s real risks rather than padding</td></tr>
+          </tbody>
+        </table>
+        <div class="card">
+          <p>CI runs on Ubuntu and Windows, publishes through a dedicated workflow, and has a separate agent-metadata sync path. That is appropriate for a tool whose hardest failures are often path and platform specific.</p>
+        </div>
+        <table>
+          <thead><tr><th>Document</th><th>Status</th><th>Quality</th></tr></thead>
+          <tbody>
+            <tr><td>README</td><td>Present</td><td>Good</td></tr>
+            <tr><td>Architecture guidance</td><td>Present</td><td><code>AGENTS.md</code> is unusually concrete</td></tr>
+            <tr><td>API docs</td><td>Absent</td><td>Not essential, but module-level docs could help contributors</td></tr>
+            <tr><td>Inline comments</td><td>Adequate</td><td>Used mostly around cross-platform path behavior</td></tr>
+            <tr><td>Contributor guide</td><td>Partial</td><td>README plus AGENTS is workable but not exhaustive</td></tr>
+          </tbody>
+        </table>
+        <div class="risk high">
+          <h4><span class="severity high">Medium</span>Large install orchestrator</h4>
+          <p><strong>Category:</strong> Maintainability</p>
+          <p><strong>Evidence:</strong> <code>src/add.ts</code></p>
+          <p><strong>Impact:</strong> UX, source parsing, fetch/clone, installation, telemetry, and lock updates meet in one place, so changes here carry broad regression risk.</p>
+        </div>
+        <div class="risk medium">
+          <h4><span class="severity medium">Low</span>CI validation contract is slightly blurry</h4>
+          <p><strong>Category:</strong> Reliability</p>
+          <p><strong>Evidence:</strong> <code>.github/workflows/ci.yml</code> runs <code>pnpm build</code> under a "Type check" label</p>
+          <p><strong>Impact:</strong> The pipeline still does useful validation, but the distinction between compile, build, and type-only checks is less explicit than the scripts suggest.</p>
+        </div>
+        <div class="risk medium">
+          <h4><span class="severity medium">Medium</span>License evidence is package-level only</h4>
+          <p><strong>Category:</strong> Commercial Viability</p>
+          <p><strong>Evidence:</strong> <code>package.json</code> says MIT, but no top-level <code>LICENSE</code> file was found</p>
+          <p><strong>Impact:</strong> Commercial use is probably fine, but source-level due diligence is less crisp than it should be.</p>
+        </div>
+        <div class="risk low">
+          <h4><span class="severity low">Low</span>Telemetry and audit are embedded in normal workflows</h4>
+          <p><strong>Category:</strong> Operations</p>
+          <p><strong>Evidence:</strong> <code>src/telemetry.ts</code>, <code>src/add.ts</code></p>
+          <p><strong>Impact:</strong> The code is opt-out and timeout-bounded, but privacy-sensitive adopters may still want clearer documentation or defaults.</p>
+        </div>
+        <div class="risk medium">
+          <h4><span class="severity medium">Medium</span>Update behavior is uneven by source type</h4>
+          <p><strong>Category:</strong> Reliability</p>
+          <p><strong>Evidence:</strong> <code>src/cli.ts</code>, <code>src/skill-lock.ts</code></p>
+          <p><strong>Impact:</strong> GitHub-backed installs get the strongest automatic refresh path, while local, git, well-known, and legacy entries need more manual handling.</p>
+        </div>
+        <div class="card">
+          <p><strong>Commercial &amp; reuse viability:</strong> The intended posture is permissive. MIT allows commercial use, closed-source embedding, and redistribution with attribution, though adding a top-level license file would remove ambiguity for source adopters.</p>
+        </div>
+      </section>
+
+      <section id="unknowns">
+        <h3>Unknowns Worth Verifying</h3>
+        <div class="unknown">
+          <strong>Real-world compatibility drift</strong>
+          <p>The repo encodes many external agent paths and detection heuristics, but static analysis cannot prove those conventions still match current agent releases.</p>
+        </div>
+        <div class="unknown">
+          <strong>Published artifact fidelity</strong>
+          <p>I did not run <code>pnpm build</code> or inspect the emitted <code>dist/</code>, so the exact publish artifact shape remains unverified.</p>
+        </div>
+        <div class="unknown">
+          <strong>Windows symlink behavior under locked-down environments</strong>
+          <p>The installer has careful fallback logic, but actual user experience depends on OS policy, developer mode, and corporate restrictions.</p>
+        </div>
+        <div class="unknown">
+          <strong>Telemetry endpoint durability and policy</strong>
+          <p>The code shows timeout handling and opt-out environment variables, but retention policy and operational expectations of the remote service are outside static code evidence.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const root = document.documentElement;
+    const sidebar = document.getElementById('sidebar');
+    const themeToggle = document.getElementById('themeToggle');
+    const mobileToggle = document.getElementById('mobileToggle');
+    const navLinks = Array.from(document.querySelectorAll('.nav a'));
+
+    themeToggle.addEventListener('click', () => {
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      themeToggle.textContent = next === 'dark' ? 'Toggle light mode' : 'Toggle dark mode';
+    });
+
+    mobileToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+    });
+
+    navLinks.forEach((link) => {
+      link.addEventListener('click', () => {
+        navLinks.forEach((item) => item.classList.remove('active'));
+        link.classList.add('active');
+        if (window.innerWidth <= 900) {
+          sidebar.classList.remove('open');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

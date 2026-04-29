@@ -57,6 +57,13 @@ export class WellKnownProvider implements HostProvider {
   private readonly WELL_KNOWN_PATHS = ['.well-known/agent-skills', '.well-known/skills'] as const;
   private readonly INDEX_FILE = 'index.json';
 
+  private getMetadata(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    return value as Record<string, unknown>;
+  }
+
   /**
    * Check if a URL could be a well-known skills endpoint.
    * This is a fallback provider - it matches any HTTP(S) URL that is not
@@ -315,7 +322,7 @@ export class WellKnownProvider implements HostProvider {
         content,
         installName: entry.name,
         sourceUrl: skillMdUrl,
-        metadata: data.metadata,
+        metadata: this.getMetadata(data.metadata),
         files,
         indexEntry: entry,
       };

@@ -7,7 +7,7 @@ describe('skills CLI', () => {
   describe('--help', () => {
     it('should display help message', () => {
       const output = runCliOutput(['--help']);
-      expect(output).toContain('Usage: skills <command> [options]');
+      expect(output).toContain('Usage: skilldirs <command> [options]');
       expect(output).toContain('Manage Skills:');
       expect(output).toContain('init [name]');
       expect(output).toContain('add <package>');
@@ -47,9 +47,9 @@ describe('skills CLI', () => {
     it('should display banner', () => {
       const output = stripLogo(runCliOutput([]));
       expect(output).toContain('The open agent skills ecosystem');
-      expect(output).toContain('npx skills add');
-      expect(output).toContain('npx skills update');
-      expect(output).toContain('npx skills init');
+      expect(output).toContain('npx skilldirs add');
+      expect(output).toContain('npx skilldirs update');
+      expect(output).toContain('npx skilldirs init');
       expect(output).toContain('skills.sh');
     });
   });
@@ -59,7 +59,7 @@ describe('skills CLI', () => {
       const output = runCliOutput(['unknown-command']);
       expect(output).toMatchInlineSnapshot(`
         "Unknown command: unknown-command
-        Run skills --help for usage.
+        Run skilldirs --help for usage.
         "
       `);
     });

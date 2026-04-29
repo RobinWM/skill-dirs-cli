@@ -7,6 +7,13 @@ import { getPluginSkillPaths, getPluginGroupings } from './plugin-manifest.ts';
 
 const SKIP_DIRS = ['node_modules', '.git', 'dist', 'build', '__pycache__'];
 
+function getMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 /**
  * Check if internal skills should be installed.
  * Internal skills are hidden by default unless INSTALL_INTERNAL_SKILLS=1 is set.
@@ -46,7 +53,8 @@ export async function parseSkillMd(
     // Skip internal skills unless:
     // 1. INSTALL_INTERNAL_SKILLS=1 is set, OR
     // 2. includeInternal option is true (e.g., when user explicitly requests a skill)
-    const isInternal = data.metadata?.internal === true;
+    const metadata = getMetadata(data.metadata);
+    const isInternal = metadata?.internal === true;
     if (isInternal && !shouldInstallInternalSkills() && !options?.includeInternal) {
       return null;
     }
@@ -56,7 +64,7 @@ export async function parseSkillMd(
       description: sanitizeMetadata(data.description),
       path: dirname(skillMdPath),
       rawContent: content,
-      metadata: data.metadata,
+      metadata,
     };
   } catch {
     return null;
